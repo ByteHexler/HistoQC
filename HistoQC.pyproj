@@ -71,6 +71,7 @@
     <Content Include="histoqc\config\config_clinical.ini" />
     <Content Include="histoqc\config\config_first.ini" />
     <Content Include="histoqc\config\config_ihc.ini" />
+    <Content Include="histoqc\config\slide_prep.ini" />
     <Content Include="histoqc\config\config_light.ini" />
     <Content Include="histoqc\config\config_v2.1.ini" />
     <Content Include="histoqc\data\models\coverslip_edge_he\coverslip_edge.png" />
