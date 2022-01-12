@@ -3,26 +3,25 @@ import os
 
 import math
 from distutils.util import strtobool
+
 import skimage
-from histoqc.BaseImage import printMaskHelper
-from skimage import io, img_as_ubyte, morphology, measure
+from skimage import io, img_as_ubyte
 from skimage.color import rgb2gray, rgb2hsv
-from skimage.filters import rank
+
 import numpy as np
 
 from enum import Enum
 from PIL import Image, ImageDraw, ImageFont
 
 def generateScaledMaskedImage(s, params):
-    
+    # saves masked slide
     img = s.getImgThumb(params.get("image_work_size", "1.25x"))
     mask = skimage.transform.resize(s["img_mask_use"], img[:, :, 1].shape, order=0) > 0
     masked_img = img*np.dstack([mask, mask, mask])
     io.imsave(s["outdir"] + os.sep + s["filename"] + "_scaled_mask_applied.png", img_as_ubyte(masked_img))
-    
-    return
 
 def maskedImage(img, mask):
+    # helper function to mask slide
     masked_img = img*np.dstack([mask, mask, mask])
     return masked_img
 
@@ -33,6 +32,18 @@ def extractTiles(slide, params):
 
     logging.info(f"{slide['filename']} - \textractTissueTiles")
     
+    # get parameters for tile extraction from config file and set them as global variables
+    # (standard values after comma)
+    #
+    # example of syntax in config file:
+    #
+    #   [PatchExtractionModule.extractTiles]
+    #   image_work_size: 2.5x
+    #   tissue_tiles: True
+    #   max_tile_num: 400
+    #   patchsize: 256
+    #   overlap: 16
+
     global ROW_TILE_SIZE
     global COL_TILE_SIZE
     global ROW_OVERLAP
@@ -46,41 +57,65 @@ def extractTiles(slide, params):
     global TILE_SAVE_LEVEL
     global s
 
+    # zoom level to extract patches from
+    TILE_SAVE_LEVEL = params.get("image_work_size", "10.0x")
+
+    # define tile dimensions in pixels at the specified zoom level
+    #   either which patchsize for both horizontal and vertical dimension
+    #   or with row_size and col_size separately
     ROW_TILE_SIZE = int(params.get("row_size", 128))
     COL_TILE_SIZE = int(params.get("col_size", ROW_TILE_SIZE))
     ROW_TILE_SIZE= int(params.get("patchsize", ROW_TILE_SIZE))
     COL_TILE_SIZE = int(params.get("patchsize", COL_TILE_SIZE))
     
+    # define overlap of tiles in pixels
+    #   note that overlap migh not look very pretty in summmary pictures
+    #   but is useful in some applications
     ROW_OVERLAP = int(params.get("row_overlap", 0))
     COL_OVERLAP = int(params.get("col_overlap", ROW_OVERLAP))
     ROW_OVERLAP = int(params.get("overlap", ROW_OVERLAP))
     COL_OVERLAP = int(params.get("overlap", COL_OVERLAP))
 
+    # save top tiles (according to scoring) and/or tiles above tissue threshold
+    save_tiles_with_tissue = strtobool(params.get("tissue_tiles", "False"))
+    save_top_tiles = strtobool(params.get("top_tiles", str(not save_tiles_with_tissue)))
+
+    # define threshold in area percent for high and low tissue tiles
+    #   only tiles with tissue_area > tissue_high_thresh % are saved when tissue_tiles is set to True
+    #   in summary images, tiles beneath tissue_low_thres are depicted with red,
+    #   tiles between low and high with yellow and tiles above tissue_high_thres with green borders 
     TISSUE_HIGH_THRESH = int(params.get("tissue_high_thresh", 80))
     TISSUE_LOW_THRESH = int(params.get("tissue_low_thresh", 10))
 
+    # specify number of patches to extract from each slide
+    #   when tissue_tiles is True it saves the first x highest scoring tiles
+    #   that are above tissue_high_thres, where x is defined by max_tile_num
+    MAX_TILE_NUM = int(params.get("max_tile_num", 1000))            # -1 means all
+    NUM_TOP_TILES = int(params.get("num_top_tiles", min(50, MAX_TILE_NUM)))
+    
+    # specify colour values for colour score of H&E stains
     HSV_PURPLE = int(params.get("hsv_purple", 270))
     HSV_PINK = int(params.get("hsv_pink", 330))
 
-    MAX_TILE_NUM = int(params.get("max_tile_num", 1000))            #-1 means all
-    NUM_TOP_TILES = int(params.get("num_top_tiles", min(50, MAX_TILE_NUM)))
-
-    TILE_SAVE_LEVEL = params.get("image_work_size", "10.0x")
-
-    save_tiles_with_tissue = strtobool(params.get("tissue_tiles", "False"))
-    save_top_tiles = strtobool(params.get("top_tiles", str(not save_tiles_with_tissue)))
+    # specify whether to save tile data as .csv file
     save_csv = strtobool(params.get("save_csv", "False"))
     
+    # global var for slide (includes e.g. path and mask data)
     s = slide
 
+    # start patch extraction -> saves tiles and summaries as .pngs
+    #   the code used is a modified version of "tiles.py" from the Repository "deep-histopath" (https://github.com/CODAIT/deep-histopath/tree/master/deephistopath/wsi)
+    #   for more information e.g. regarding the tile scoring, see: https://developer.ibm.com/articles/an-automatic-method-to-identify-tissues-from-big-whole-slide-images-pt4/
     summary_and_tiles(display=False, save_summary=True, save_data=save_csv, save_top_tiles=save_top_tiles, save_tiles_with_tissue=save_tiles_with_tissue)
 
 
-
-DISPLAY_TILE_SUMMARY_LABELS = False
+# display option constants for summary images
+# (labels/borders on/off, colors and sizes)
+# change them to fit your needs
+DISPLAY_TILE_SUMMARY_LABELS = False             #True degrades performance
 TILE_LABEL_TEXT_SIZE = 10
-LABEL_ALL_TILES_IN_TOP_TILE_SUMMARY = True
-BORDER_ALL_TILES_IN_TOP_TILE_SUMMARY = True
+LABEL_ALL_TILES_IN_TOP_TILE_SUMMARY = False     #True degrades performance
+BORDER_ALL_TILES_IN_TOP_TILE_SUMMARY = False    #True degrades performance
 
 TILE_BORDER_SIZE = 2  # The size of the colored rectangular border around summary tiles.
 
@@ -94,8 +129,8 @@ FADED_MEDIUM_COLOR = (255, 255, 128)
 FADED_LOW_COLOR = (255, 210, 128)
 FADED_NONE_COLOR = (255, 128, 128)
 
-FONT_PATH = "C:/Windows/Fonts/arialbd.ttf"
-SUMMARY_TITLE_FONT_PATH = "C:/Windows/Fonts/courbd.ttf"
+FONT_PATH = "C:/Windows/Fonts/arialbd.ttf"                  # modify font paths
+SUMMARY_TITLE_FONT_PATH = "C:/Windows/Fonts/courbd.ttf"     # if necessary (e. g. on mac)
 SUMMARY_TITLE_TEXT_COLOR = (0, 0, 0)
 SUMMARY_TITLE_TEXT_SIZE = 24
 SUMMARY_TILE_TEXT_COLOR = (255, 255, 255)
